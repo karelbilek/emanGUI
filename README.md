@@ -5,4 +5,4 @@ Curses-based "GUI" for eman - evaluation manager, tool for statistical machine t
 
 Nobody except me will probably ever use it.
 
-All of it is under BSD licence, I am just too lazy to write proper copyright headers. (C) Karel Bílek 2013
+All of it is under GPLv2, I am just too lazy to write proper copyright headers. (C) Karel Bílek 2013
