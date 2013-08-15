@@ -1,0 +1,332 @@
+#!/usr/bin/env perl
+use FindBin;  
+use lib "$FindBin::Bin";
+
+use strict;
+use 5.010;
+use Curses::UI;
+#use Foo::Bar;
+use EmanGUI::DisplayableItems;
+use EmanGUI::DisplayableItemsGeneral;
+use EmanGUI::ListItemGeneral;
+use EmanGUI::ListItemGroup;
+
+my $display;
+my $cui;
+my $win_main;
+my $win_second;
+my $statusbar;
+my $textviewer;
+
+sub fint {
+    my $w = shift;
+    $w =~ s/\d{1,3}(?=(\d{3})+(?!\d))/$&,/g;
+    return $w;
+}
+
+sub construct_basic_gui {
+    $cui = new Curses::UI( -color_support => 1 );
+
+    my $exit_dialog = sub{
+        my $return = $cui->dialog(
+            -message   => "Do you really want to quit?",
+            -title     => "Are you sure???", 
+            -buttons   => ['yes', 'no'],
+        );
+        exit(0) if $return;
+    };
+    my @menu = ( { -label => 'File', 
+               -submenu => [{ -label => 'Exit      ^Q', -value => $exit_dialog  }]
+    });
+
+
+    my $menu = $cui->add(
+                'menu','Menubar', 
+                -menu => \@menu,
+                -fg  => "blue");
+
+
+    $win_main = $cui->add('win1', 'Window',
+                    -border => 1,
+                    -y    => 1,
+                    -width=>50,
+                    -bfg  => 'red',
+                    -padbottom=>1
+                    );
+
+    $win_second = $cui->add('win2', 'Window',
+                    -border => 1,
+                    -y    => 1,
+                    -bfg  => 'blue',
+                    -padbottom=>1,
+                    '-x'=>50
+                    );
+
+
+     my $winS = $cui->add('winS', 'Window',
+                    -border => 1,
+                    -y    => -1,
+                    -height=>1,
+                    -border=>0
+                     );
+     $statusbar = $winS->add(
+        'statusbar', 'TextViewer',
+        -text=>'ctrl-X do menu'
+     );
+     $textviewer = $win_second->add(
+            'rightViewer', 'TextViewer',
+            -text=>"Welcome to EmanGUI!\n\nSelect something on the left to display something here. Press enter to do things.\n\nCtrl-X escapes to the top menu, although there is not much to do there.",
+             -wrapping   => 1,
+     );
+
+    $cui->set_binding(sub {$menu->focus()}, "\cX");
+    $cui->set_binding( $exit_dialog , "\cQ");
+}
+
+
+
+sub display_items {
+    my $old_ypos = $display->{-ypos} //0;
+    my $d_items=shift;
+    my $values = $d_items->items_description;
+    my $hints = $d_items->items_hints;
+    $win_main->delete('leftListbox');
+    $display = $win_main->add(
+            'leftListbox', 'Listbox',
+            -values=>$values,
+            -vscrollbar=>1,
+            -onselchange=>sub{
+                $d_items->run_onCursor($display->{-ypos});
+                $statusbar->{-text} = $hints->[$display->{-ypos}] || $d_items->description;
+                $statusbar->draw;
+            },
+            -onchange=>sub{
+                $d_items->run_onEnter($display->{-selected});
+                $display->{-selected} = undef
+             },
+            
+            );
+    $statusbar->{-text}=$d_items->description;
+    $statusbar->draw;
+    $display->{-ypos}=$old_ypos;
+    $display->draw;
+
+    #hack - some bug in curses, I guess
+    $statusbar->focus;
+    $display->focus;
+}
+
+#sub redraw {
+#    $display->{-values}=$items->items_description;
+#    $display->draw;
+#}
+
+sub corpora_items {
+    my $item=shift;
+    my @corpora_out = `./corpman ls`;
+    if (scalar @corpora_out==0) {
+        $cui->dialog(-message=>"Either there is no corpora, or there is no corpman.");
+    }
+
+    chomp @corpora_out;
+    #my @corpora_names;
+    my %corpora_whole;
+    my %corpora_hash;
+    my %max_name;
+    for my $corpora_line (@corpora_out) {
+        my ($name,$lan,$factors,$lines) = $corpora_line=~/^([^\/]+)\/([^\+]+)\+([\S]+)\s(.*)$/ 
+                or die "BAD LINE $corpora_line";
+        #if (!exists $corpora_hash{$name}) {
+        #    push @corpora_names, $name;
+        #}
+        if (!defined $max_name{$name} or $max_name{$name}<=$lines) {
+            $max_name{$name}=$lines;
+        }
+        $corpora_hash{$name}{$lan}{$factors}=$lines;
+        $corpora_whole{$name}{$lan}{$factors}=$corpora_line;
+    }
+    for my $corpus_name (sort keys %corpora_hash) {
+        my $corpusItem =  new EmanGUI::ListItemGroup(description=>$corpus_name." - ".fint($max_name{$corpus_name}));
+        $item->addItemGroup($corpusItem);
+
+        for my $corpus_lan (sort keys %{$corpora_hash{$corpus_name}}) {
+            my $lanItem =  new EmanGUI::ListItemGroup(description=>$corpus_lan);
+            $corpusItem->addItemGroup($lanItem);
+            
+            for my $corpus_fac (sort keys %{$corpora_hash{$corpus_name}{$corpus_lan}}) {
+                $lanItem->addItem(new EmanGUI::ListItem {
+                    description=>$corpus_fac." - ".fint($corpora_hash{$corpus_name}{$corpus_lan}{$corpus_fac}),
+                    hint=>$corpora_whole{$corpus_name}{$corpus_lan}{$corpus_fac},
+                    onCursor=>sub{
+                        my $name=$corpus_name."/".$corpus_lan."+".$corpus_fac;
+                        $textviewer->{-text}=corpus_data($name,
+                                           $corpora_hash{$corpus_name}{$corpus_lan}{$corpus_fac} );
+                        $textviewer->draw
+                    },
+                    onEnter=>sub {$cui->dialog(-message=>"Jop")}
+                });
+                #my $lanItem =  new EmanGUI::ListItemGroup(description=>$corpus_lan);
+                #$corpusItem->addItemGroup($lanItem);
+            }
+         }
+    }
+}
+sub seeds_item {
+    my $item = shift;
+    my @ls_out = `ls eman.seeds/`;
+    if (scalar @ls_out==0) {
+        $cui->dialog(-message=>"There are no seeds.");
+    }
+
+    chomp @ls_out;
+    for my $seedt (@ls_out) {
+                $item->addItem(new EmanGUI::ListItem {
+                    description=>$seedt,
+                    hint=>"seed $seedt",
+                    onCursor=>sub{
+                        $textviewer->{-text}=`cat eman.seeds/$seedt`;
+                        $textviewer->draw
+                    },
+                    onEnter=>sub {$cui->dialog(-message=>"Jop")}
+                });
+ 
+    }
+}
+
+sub read_tag {
+    my $stepname = shift;
+    my $res = `eman tag $stepname`;
+    chomp $res;
+    $res=~s/$stepname\s+//;
+    return $res;
+}
+
+sub steps_item {
+    my $item = shift;
+    my @steps_out = `eman stat`;
+    if (scalar @steps_out==0) {
+        $cui->dialog(-message=>"There are no steps");
+    }
+    chomp @steps_out;
+
+    my %mcount;
+    my %tcount;
+    my %scount;
+    my %steps_hash;
+    for my $step_line (@steps_out) {
+        my ($type, $hash, $month, $rest, $stat) = 
+            $step_line =~ /^s\.([^\.]+)\.([^\.]+)\.(......)(..-....)\s(.+)$/
+            or die "bad line $step_line";
+        $steps_hash{$month}{$type}{$stat}{$hash}=$step_line;
+        $mcount{$month}++;
+        $tcount{$month}{$type}++;
+        $scount{$month}{$type}{$stat}++;
+    } 
+    for my $step_month (sort {$b<=>$a} keys %steps_hash) {
+        my $nicer_month = $step_month;
+        $nicer_month =~ s/^(....)/$1 /;
+        my $corpusItem =  new EmanGUI::ListItemGroup(description=>$nicer_month." [".$mcount{$step_month}."]");
+        $item->addItemGroup($corpusItem);
+        for my $step_type (sort keys %{$steps_hash{$step_month}}) {
+            my $typeItem =  new EmanGUI::ListItemGroup(description=>$step_type." [".$tcount{$step_month}{$step_type}."]");
+            $corpusItem->addItemGroup($typeItem);
+            for my $step_stat (sort keys %{$steps_hash{$step_month}{$step_type}}) {
+                my $statItem =  new EmanGUI::ListItemGroup(description=>$step_stat.
+                                " [".$scount{$step_month}{$step_type}{$step_stat}."]");
+                $typeItem->addItemGroup($statItem);
+                for my $step_h (keys %{$steps_hash{$step_month}{$step_type}{$step_stat}}) {
+                    my $wh = $steps_hash{$step_month}{$step_type}{$step_stat}{$step_h};
+                    my $p=$wh;
+
+                    $p =~ s/\s.*$//;
+                    my $tag = read_tag($p);
+                    my $toWrite;
+                    if (!$tag) {
+                        $toWrite =$step_h;
+                    } else {
+                        $toWrite = $tag;
+                    }
+                    $statItem->addItem(new EmanGUI::ListItem {
+                        description=>$toWrite,
+                        hint=>$wh,
+                        onCursor=>sub{
+                            $textviewer->{-text}="WEEE";
+                            $textviewer->draw
+                        },
+                        onEnter=>sub {$cui->dialog(-message=>"Jop")}
+                    });
+    
+                }
+            }
+
+        }
+    }
+}
+
+sub eman_items {
+    my $listItems = new EmanGUI::DisplayableItemsGeneral{description=>'Welcome to emanGUI', repaint=>\&display_items};
+        
+    my $corporaItem = new EmanGUI::ListItemGroup(description=>"corpora");
+    $listItems->addItemGroup($corporaItem);
+    corpora_items($corporaItem);    
+
+    my $seedItem = new EmanGUI::ListItemGroup(description=>"seeds");
+    $listItems->addItemGroup($seedItem);
+    seeds_item($seedItem);
+
+    my $stepItem = new EmanGUI::ListItemGroup(description=>"steps");
+    $listItems->addItemGroup($stepItem);
+    steps_item($stepItem);
+
+    return $listItems->toDisplayableItems();
+
+}
+
+my %saved_cdata;
+sub corpus_data {
+    my $corpus_name=shift;
+    my $lines = shift;
+    if (exists $saved_cdata{$corpus_name}) {
+        return $saved_cdata{$corpus_name};
+    }
+    my $res= "Name\n--\n$corpus_name\n\n";
+    my $seeds = `./corpman $corpus_name 2>&1`;
+    my $readit;
+    if ($seeds=~/Failed/) {
+        $res .= "Seed error\n--\n";
+        $readit=0;
+    } else {
+        $res .= "Seed\n--\n";
+        $readit=1;
+    }
+    $res .= $seeds;
+    $res .="\nLines\n--\n".fint($lines)."\n\n";
+    
+    if ($readit) {
+        my $data_start = `./corpman --dump $corpus_name|head -n 2`;
+        $res .="Example\n--\n";
+        $res.=$data_start;
+        
+        my $data_longstart = `./corpman --dump $corpus_name|head -n 20`;
+        my $wordsnum = scalar split (/\s+/, $data_longstart);
+
+        $res.="\nApprox tok/sent; approx all tok\n--\n";
+        $res.=($wordsnum/20.0);
+        $res .= "; ";
+        $res.=fint(($wordsnum/20.0)*$lines);
+    }
+    $saved_cdata{$corpus_name}=$res;
+    return $res;
+}
+
+construct_basic_gui();
+
+print "Reading eman steps. It might take some time...\n";
+
+#my $items = complicated_items();
+my $items = eman_items();
+#print $items;
+display_items($items);
+
+#$texteditor->focus();
+$cui->mainloop();
