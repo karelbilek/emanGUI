@@ -14,7 +14,7 @@ has 'hint' => (isa=>'Str', is=>'ro', default=>sub{""});
 method real_description() {
     my $res="";
     for  (0..($self->level - 1)) {
-        $res.= " | ";
+        $res.= "| ";
     }
     $res.=$self->description();
 }

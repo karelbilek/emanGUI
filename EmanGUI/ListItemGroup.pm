@@ -29,9 +29,9 @@ method addItemGroup (EmanGUI::ListItemGroup $itemG) {
 method toListItems() {
     my $description_all=$self->description;
     if ($self->is_open) {
-        $description_all="[-] ".$description_all;
+        $description_all="- ".$description_all;
     } else {
-        $description_all="[+] ".$description_all;
+        $description_all="+ ".$description_all;
     }
 
     my $onCursor=sub{};

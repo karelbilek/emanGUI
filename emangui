@@ -112,6 +112,7 @@ sub display_items {
     $display->draw;
 
     #hack - some bug in curses, I guess
+    $statusbar->layout;
     $statusbar->focus;
     $display->focus;
 }
@@ -203,51 +204,62 @@ sub read_tag {
 
 sub steps_item {
     my $item = shift;
-    my @steps_out = `eman stat`;
+    my @steps_out = `eman tag`;
     if (scalar @steps_out==0) {
         $cui->dialog(-message=>"There are no steps");
     }
     chomp @steps_out;
 
-    my %mcount;
-    my %tcount;
-    my %scount;
-    my %steps_hash;
+    #my %tagt_count;
+    my %tagc_count;
+    my %month_count;
+    my %steptags_hash;
     for my $step_line (@steps_out) {
-        my ($type, $hash, $month, $rest, $stat) = 
-            $step_line =~ /^s\.([^\.]+)\.([^\.]+)\.(......)(..-....)\s(.+)$/
+        my ($type, $hash, $month, $rest, $tags) = 
+            $step_line =~ /^s\.([^\.]+)\.([^\.]+)\.(......)(..-....)\s(.*)$/
             or die "bad line $step_line";
-        $steps_hash{$month}{$type}{$stat}{$hash}=$step_line;
-        $mcount{$month}++;
-        $tcount{$month}{$type}++;
-        $scount{$month}{$type}{$stat}++;
+        if ($tags eq "") {
+            $tags="untagged";
+        }
+        
+        my @tags_split=split (/ /,$tags);
+        for my $tag (@tags_split) {
+            my ($firstpart, $secpart);
+            if ($tag =~ /:/) {
+                ($firstpart,$secpart) = $tag=~/^(.*):(.*)$/;
+            
+            } else {
+                $secpart=$tag;
+                $firstpart =$secpart;
+            }
+            $steptags_hash{$firstpart}{$secpart}{$month}{$hash}=$step_line;
+            #$tagt_count{$firstpart}++;
+            $tagc_count{$firstpart}{$secpart}++;
+            $month_count{$firstpart}{$secpart}{$month}++;
+        }
+        
     } 
-    for my $step_month (sort {$b<=>$a} keys %steps_hash) {
-        my $nicer_month = $step_month;
-        $nicer_month =~ s/^(....)/$1 /;
-        my $corpusItem =  new EmanGUI::ListItemGroup(description=>$nicer_month." [".$mcount{$step_month}."]");
+    for my $step_tagtype (sort keys %steptags_hash) {
+        my $corpusItem =  new EmanGUI::ListItemGroup(description=>$step_tagtype);
         $item->addItemGroup($corpusItem);
-        for my $step_type (sort keys %{$steps_hash{$step_month}}) {
-            my $typeItem =  new EmanGUI::ListItemGroup(description=>$step_type." [".$tcount{$step_month}{$step_type}."]");
-            $corpusItem->addItemGroup($typeItem);
-            for my $step_stat (sort keys %{$steps_hash{$step_month}{$step_type}}) {
-                my $statItem =  new EmanGUI::ListItemGroup(description=>$step_stat.
-                                " [".$scount{$step_month}{$step_type}{$step_stat}."]");
-                $typeItem->addItemGroup($statItem);
-                for my $step_h (keys %{$steps_hash{$step_month}{$step_type}{$step_stat}}) {
-                    my $wh = $steps_hash{$step_month}{$step_type}{$step_stat}{$step_h};
+        for my $step_tag (sort keys %{$steptags_hash{$step_tagtype}}) {
+            my $tagItem =  new EmanGUI::ListItemGroup(description=>$step_tag." [".$tagc_count{$step_tagtype}{$step_tag}."]");
+            $corpusItem->addItemGroup($tagItem);
+            for my $step_tmonth (sort keys %{$steptags_hash{$step_tagtype}{$step_tag}}) {
+                my $nicer_month = $step_tmonth;
+                $nicer_month =~ s/^(....)/$1 /;
+                my $mItem =  new EmanGUI::ListItemGroup(description=>$nicer_month.
+                                " [".$month_count{$step_tagtype}{$step_tag}{$step_tmonth}."]");
+                $tagItem->addItemGroup($mItem);
+                for my $step_h (keys %{$steptags_hash{$step_tagtype}{$step_tag}{$step_tmonth}}) {
+                    my $wh = $steptags_hash{$step_tagtype}{$step_tag}{$step_tmonth}{$step_h};
                     my $p=$wh;
 
+                   
+
                     $p =~ s/\s.*$//;
-                    my $tag = read_tag($p);
-                    my $toWrite;
-                    if (!$tag) {
-                        $toWrite =$step_h;
-                    } else {
-                        $toWrite = $tag;
-                    }
-                    $statItem->addItem(new EmanGUI::ListItem {
-                        description=>$toWrite,
+                    $mItem->addItem(new EmanGUI::ListItem {
+                        description=>$p,
                         hint=>$wh,
                         onCursor=>sub{
                             $textviewer->{-text}="WEEE";
@@ -321,7 +333,7 @@ sub corpus_data {
 
 construct_basic_gui();
 
-print "Reading eman steps. It might take some time...\n";
+warn "Reading eman steps. It might take some time...\n";
 
 #my $items = complicated_items();
 my $items = eman_items();
